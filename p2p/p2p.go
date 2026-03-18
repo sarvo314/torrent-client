@@ -8,9 +8,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/veggiedefender/torrent-client/client"
-	"github.com/veggiedefender/torrent-client/message"
-	"github.com/veggiedefender/torrent-client/peers"
+	"github.com/sarvo314/torrent-client/client"
+	"github.com/sarvo314/torrent-client/message"
+	"github.com/sarvo314/torrent-client/peers"
 )
 
 // MaxBlockSize is the largest number of bytes a request can ask for
