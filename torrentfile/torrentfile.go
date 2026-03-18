@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/jackpal/bencode-go"
@@ -16,12 +17,13 @@ const Port uint16 = 6881
 
 // TorrentFile encodes the metadata from a .torrent file
 type TorrentFile struct {
-	Announce    string
-	InfoHash    [20]byte
-	PieceHashes [][20]byte
-	PieceLength int
-	Length      int
-	Name        string
+	Announce     string
+	AnnounceList []string
+	InfoHash     [20]byte
+	PieceHashes  [][20]byte
+	PieceLength  int
+	Length       int
+	Name         string
 }
 
 type bencodeInfo struct {
@@ -32,8 +34,19 @@ type bencodeInfo struct {
 }
 
 type bencodeTorrent struct {
-	Announce string      `bencode:"announce"`
-	Info     bencodeInfo `bencode:"info"`
+	Announce     string      `bencode:"announce"`
+	AnnounceList [][]string  `bencode:"announce-list"`
+	Info         bencodeInfo `bencode:"info"`
+}
+
+func flattenAnnounceList(al [][]string) []string {
+	var result []string
+	for _, tier := range al {
+		for _, tracker := range tier {
+			result = append(result, tracker)
+		}
+	}
+	return result
 }
 
 // DownloadToFile downloads a torrent and writes it to a file
@@ -126,13 +139,19 @@ func (bto *bencodeTorrent) toTorrentFile() (TorrentFile, error) {
 	if err != nil {
 		return TorrentFile{}, err
 	}
+	announceList := flattenAnnounceList(bto.AnnounceList)
+	if len(announceList) == 0 && bto.Announce != "" {
+		announceList = []string{bto.Announce}
+	}
+	log.Println("Announce list is %v", announceList)
 	t := TorrentFile{
-		Announce:    bto.Announce,
-		InfoHash:    infoHash,
-		PieceHashes: pieceHashes,
-		PieceLength: bto.Info.PieceLength,
-		Length:      bto.Info.Length,
-		Name:        bto.Info.Name,
+		Announce:     bto.Announce,
+		AnnounceList: announceList,
+		InfoHash:     infoHash,
+		PieceHashes:  pieceHashes,
+		PieceLength:  bto.Info.PieceLength,
+		Length:       bto.Info.Length,
+		Name:         bto.Info.Name,
 	}
 	return t, nil
 }
