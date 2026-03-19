@@ -1,1 +1,5 @@
 ubuntu-25.10-desktop-amd64.iso.torrent
+*.torrent
+*.mp3
+*.jpg
+/wired_cd_files

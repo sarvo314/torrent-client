@@ -17,13 +17,13 @@ import (
 )
 
 type bencodeTrackerResp struct {
-	Interval      int          `bencode:"interval"`
-	Peers         []peers.Peer `bencode:"peers"`
-	FailureReason string       `bencode:"failure reason"`
+	Interval      int         `bencode:"interval"`
+	Peers         interface{} `bencode:"peers"`
+	FailureReason string      `bencode:"failure reason"`
 }
 
-func (t *TorrentFile) buildTrackerURL(peerID [20]byte, port uint16) (string, error) {
-	base, err := url.Parse(t.Announce)
+func (t *TorrentFile) buildTrackerURL(tracker string, peerID [20]byte, port uint16) (string, error) {
+	base, err := url.Parse(tracker)
 	if err != nil {
 		return "", err
 	}
@@ -45,197 +45,150 @@ func (t *TorrentFile) udpTrackerRequest(urlStr string, peerID [20]byte, port uin
 	if err != nil {
 		return nil, err
 	}
-	// host := u.Host
-	// if !strings.Contains(host, ":") {
-	// 	host = host + ":1337"
-	// }
-	conn, err := net.DialTimeout("udp", u.Host, 15*time.Second)
 
+	conn, err := net.DialTimeout("udp", u.Host, 15*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("tracker unreachable: %w", err)
 	}
 	defer conn.Close()
 
 	// Connect Phase
-	// 32 bit transaction id for making connection
 	var transactionID uint32
-	err = binary.Read(rand.Reader, binary.BigEndian, &transactionID)
+	binary.Read(rand.Reader, binary.BigEndian, &transactionID)
+
+	connReq := make([]byte, 16)
+	binary.BigEndian.PutUint64(connReq[0:8], 0x41727101980) // magic constant
+	binary.BigEndian.PutUint32(connReq[8:12], 0)           // action 0: connect
+	binary.BigEndian.PutUint32(connReq[12:16], transactionID)
+
+	connResp, err := udpExchange(conn, connReq)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("connect phase failed: %w", err)
 	}
 
-	// Send Connect Request
-	// 64-bit connection_id: 0x41727101980 (magic constant)
-	// 32-bit action: 0 (connect)
-	// 32-bit transaction_id
-	buf := make([]byte, 16)
-	binary.BigEndian.PutUint64(buf[0:8], 0x41727101980) // 0x41727101980 is the magic constant
-	binary.BigEndian.PutUint32(buf[8:12], 0)
-	binary.BigEndian.PutUint32(buf[12:16], transactionID)
-
-	conn.SetDeadline(time.Now().Add(15 * time.Second))
-	_, err = conn.Write(buf)
-	if err != nil {
-		return nil, err
+	if len(connResp) < 16 {
+		return nil, fmt.Errorf("invalid connect response length")
 	}
-
-	// Read Connect Response
-	// 32-bit action: 0 (connect)
-	// 32-bit transaction_id
-	// 64-bit connection_id
-	resp := make([]byte, 16)
-	_, err = conn.Read(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	action := binary.BigEndian.Uint32(resp[0:4])
-	resTransactionID := binary.BigEndian.Uint32(resp[4:8])
-	connectionID := binary.BigEndian.Uint64(resp[8:16]) // connectionID to be used in announce
+	action := binary.BigEndian.Uint32(connResp[0:4])
+	resTransactionID := binary.BigEndian.Uint32(connResp[4:8])
+	connectionID := binary.BigEndian.Uint64(connResp[8:16])
 
 	if action != 0 || resTransactionID != transactionID {
-		return nil, fmt.Errorf("invalid connect response")
+		return nil, fmt.Errorf("invalid connect response (action %d, tid %d)", action, resTransactionID)
 	}
-
-	// TODO: Announce Phase
-	// return nil, fmt.Errorf("announce phase not implemented yet")
 
 	// Announce Phase
 	var announceTransactionID uint32
-	err = binary.Read(rand.Reader, binary.BigEndian, &announceTransactionID)
+	binary.Read(rand.Reader, binary.BigEndian, &announceTransactionID)
 
-	if err != nil {
-		return nil, err
-	}
-	log.Println("Now Announcing")
-	buf = make([]byte, 98)
+	announceReq := make([]byte, 98)
 	var key uint32
 	binary.Read(rand.Reader, binary.BigEndian, &key)
 
-	binary.BigEndian.PutUint64(buf[0:8], connectionID)
-	binary.BigEndian.PutUint32(buf[8:12], 1) // action 1: announce
-	binary.BigEndian.PutUint32(buf[12:16], announceTransactionID)
-	copy(buf[16:36], t.InfoHash[:])
-	copy(buf[36:56], peerID[:])
-	binary.BigEndian.PutUint64(buf[56:64], 0)                // downloaded
-	binary.BigEndian.PutUint64(buf[64:72], uint64(t.Length)) // left
-	binary.BigEndian.PutUint64(buf[72:80], 0)                // uploaded
-	binary.BigEndian.PutUint32(buf[80:84], 0)                // event 0: none
-	binary.BigEndian.PutUint32(buf[84:88], 0)                // IP 0: default (autodetect from my udp padcket)
-	binary.BigEndian.PutUint32(buf[88:92], key)              // key: random
-	binary.BigEndian.PutUint32(buf[92:96], 0xFFFFFFFF)       // num_want: -1 (default)
-	binary.BigEndian.PutUint16(buf[96:98], port)             // port
+	binary.BigEndian.PutUint64(announceReq[0:8], connectionID)
+	binary.BigEndian.PutUint32(announceReq[8:12], 1) // action 1: announce
+	binary.BigEndian.PutUint32(announceReq[12:16], announceTransactionID)
+	copy(announceReq[16:36], t.InfoHash[:])
+	copy(announceReq[36:56], peerID[:])
+	binary.BigEndian.PutUint64(announceReq[56:64], 0)                // downloaded
+	binary.BigEndian.PutUint64(announceReq[64:72], uint64(t.Length)) // left
+	binary.BigEndian.PutUint64(announceReq[72:80], 0)                // uploaded
+	binary.BigEndian.PutUint32(announceReq[80:84], 0)                // event 0: none
+	binary.BigEndian.PutUint32(announceReq[84:88], 0)                // IP 0: default
+	binary.BigEndian.PutUint32(announceReq[88:92], key)              // key: random
+	binary.BigEndian.PutUint32(announceReq[92:96], 0xFFFFFFFF)       // num_want: -1
+	binary.BigEndian.PutUint16(announceReq[96:98], port)             // port
 
-	conn.SetDeadline(time.Now().Add(15 * time.Second))
-	_, err = conn.Write(buf)
-
+	announceResp, err := udpExchange(conn, announceReq)
 	if err != nil {
-		return nil, err
-	}
-	resp = make([]byte, 1500)
-
-	n, err := conn.Read(resp)
-	resp = resp[:n]
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("announce phase failed: %w", err)
 	}
 
-	if n < 20 {
-		return nil, fmt.Errorf("invalid announce response")
-	}
-	isIPv6 := false
-
-	if (n-20)%6 == 0 {
-		// IPv4
-		isIPv6 = false
-	} else if (n-20)%18 == 0 {
-		// IPv6
-		isIPv6 = true
-	} else {
-		return nil, fmt.Errorf("invalid announce response")
+	if len(announceResp) < 20 {
+		return nil, fmt.Errorf("invalid announce response length")
 	}
 
-	peerList := make([]peers.Peer, 0)
+	action = binary.BigEndian.Uint32(announceResp[0:4])
+	resTransactionID = binary.BigEndian.Uint32(announceResp[4:8])
 
-	if isIPv6 {
-		for i := 20; i < n; i += 18 {
-			ip := net.IP(resp[i : i+16])
-			port := binary.BigEndian.Uint16(resp[i+16 : i+18])
-			peerList = append(peerList, peers.Peer{
-				IP:   ip.String(),
-				Port: port,
-			})
+	if action == 3 {
+		return nil, fmt.Errorf("tracker error: %s", string(announceResp[8:]))
+	}
+	if action != 1 || resTransactionID != announceTransactionID {
+		return nil, fmt.Errorf("invalid announce response (action %d, tid %d)", action, resTransactionID)
+	}
+
+	return peers.Unmarshal(announceResp[20:])
+}
+
+func udpExchange(conn net.Conn, request []byte) ([]byte, error) {
+	var lastErr error
+	maxRetries := 3
+
+	for i := 0; i < maxRetries; i++ {
+		// Set a shorter deadline for the initial attempt
+		timeout := time.Duration(15*(1<<i)) * time.Second
+		conn.SetDeadline(time.Now().Add(timeout))
+
+		_, err := conn.Write(request)
+		if err != nil {
+			lastErr = err
+			continue
 		}
-	} else {
-		for i := 20; i < n; i += 6 {
-			ip := net.IP(resp[i : i+4])
-			port := binary.BigEndian.Uint16(resp[i+4 : i+6])
-			peerList = append(peerList, peers.Peer{
-				IP:   ip.String(),
-				Port: port,
-			})
-		}
-	}
 
-	log.Println("announce response: ", resp)
-	log.Println("peerList: ", peerList)
-	return peerList, nil
+		response := make([]byte, 1500)
+		n, err := conn.Read(response)
+		if err == nil {
+			return response[:n], nil
+		}
+		lastErr = err
+		log.Printf("UDP request failed (attempt %d): %v. Retrying...\n", i+1, err)
+	}
+	return nil, lastErr
 }
 
 func (t *TorrentFile) requestPeers(peerID [20]byte, port uint16) ([]peers.Peer, error) {
-	var lastErr error
+	var allPeers []peers.Peer
+	peerMap := make(map[string]bool)
 
-	var peers []peers.Peer
 	for _, tracker := range t.AnnounceList {
-		isUDP := strings.HasPrefix(tracker, "udp://")
-
+		var peer []peers.Peer
 		var err error
 
-		if isUDP {
-			peer, err := t.udpTrackerRequest(tracker, peerID, port)
-			if err != nil {
-				log.Println("Error in udpTrackerRequest: ", err)
-				continue
-			}
-			peers = append(peers, peer...)
-		} else {
-			url, e := t.buildTrackerURL(peerID, port)
+		switch {
+		case strings.HasPrefix(tracker, "udp://"):
+			peer, err = t.udpTrackerRequest(tracker, peerID, port)
+		case strings.HasPrefix(tracker, "http://"), strings.HasPrefix(tracker, "https://"):
+			url, e := t.buildTrackerURL(tracker, peerID, port)
 			if e != nil {
-				lastErr = e
+				log.Println("buildTrackerURL error:", e)
 				continue
 			}
-			// peers, err = tcpTrackerRequest(url)
-			peer, err := tcpTrackerRequest(url)
-			if err != nil {
-				log.Println("Error in tcpTrackerRequest: ", err)
-				continue
-			}
-			peers = append(peers, peer...)
+			peer, err = tcpTrackerRequest(url)
+		default:
+			continue
 		}
 
-		// if err == nil && len(peers) > 0 {
-		// 	return peers, nil
-		// }
-
-		lastErr = err
+		if err != nil {
+			log.Printf("Tracker %s error: %v\n", tracker, err)
+			continue
+		}
+		// peer deduplication
+		for _, p := range peer {
+			addr := p.String()
+			if !peerMap[addr] {
+				allPeers = append(allPeers, p)
+				peerMap[addr] = true
+			}
+		}
 	}
 
-	return nil, fmt.Errorf("all trackers failed: %w", lastErr)
-}
+	if len(allPeers) == 0 {
+		return nil, fmt.Errorf("could not find any peers from any tracker")
+	}
 
-// func (t *TorrentFile) requestPeers(peerID [20]byte, port uint16) ([]peers.Peer, error) {
-// 	url, err := t.buildTrackerURL(peerID, port)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	isUDP := strings.HasPrefix(t.Announce, "udp://")
-// 	if isUDP {
-// 		return t.udpTrackerRequest(url, peerID, port)
-// 		// return t.udpTrackerRequest("udp://tracker.opentrackr.org:1337/announce", peerID, port) //test url
-// 	}
-// 	//else is of type http
-// 	return tcpTrackerRequest(url)
-// }
+	return allPeers, nil
+}
 
 func tcpTrackerRequest(url string) ([]peers.Peer, error) {
 	c := &http.Client{Timeout: 15 * time.Second}
@@ -247,11 +200,6 @@ func tcpTrackerRequest(url string) ([]peers.Peer, error) {
 
 	trackerResp := bencodeTrackerResp{}
 	err = bencode.Unmarshal(resp.Body, &trackerResp)
-
-	for _, peer := range trackerResp.Peers {
-		fmt.Println(peer)
-	}
-
 	if err != nil {
 		return nil, err
 	}
@@ -260,5 +208,32 @@ func tcpTrackerRequest(url string) ([]peers.Peer, error) {
 		return nil, fmt.Errorf("tracker error: %s", trackerResp.FailureReason)
 	}
 
-	return trackerResp.Peers, nil
+	switch p := trackerResp.Peers.(type) {
+	case string:
+		log.Println("format is of string")
+		return peers.Unmarshal([]byte(p))
+	case []interface{}:
+		log.Println("format is of list")
+		return parsePeersFromList(p)
+	default:
+		return nil, fmt.Errorf("invalid peers format: %T", trackerResp.Peers)
+	}
+}
+
+func parsePeersFromList(list []interface{}) ([]peers.Peer, error) {
+	peerList := make([]peers.Peer, len(list))
+	for i, item := range list {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("invalid peer format in list")
+		}
+		peerList[i] = peers.Peer{
+			IP:   m["ip"].(string),
+			Port: uint16(m["port"].(int64)),
+		}
+		if pid, ok := m["peer id"].(string); ok {
+			peerList[i].PeerID = pid
+		}
+	}
+	return peerList, nil
 }
