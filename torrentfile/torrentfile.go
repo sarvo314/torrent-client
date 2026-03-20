@@ -225,8 +225,6 @@ func findBencodeEnd(data []byte) int {
 	return -1
 }
 
-// InfoHash is now calculated in toTorrentFile directly from the map
-
 func (bto *bencodeTorrent) toTorrentFile() (TorrentFile, error) {
 	pieceHashes, err := bto.Info.splitPieceHashes()
 	if err != nil {
@@ -254,7 +252,6 @@ func (bto *bencodeTorrent) toTorrentFile() (TorrentFile, error) {
 	}, nil
 }
 
-// Keep this helper but it's now internal or we can just move it
 func (i *bencodeInfo) splitPieceHashes() ([][20]byte, error) {
 	hashLen := 20
 	buf := []byte(i.Pieces)
