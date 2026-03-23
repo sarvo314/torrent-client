@@ -19,15 +19,19 @@ const MaxBlockSize = 16384
 // MaxBacklog is the number of unfulfilled requests a client can have in its pipeline
 const MaxBacklog = 5
 
+// ProgressFunc is called with the download percentage after each piece
+type ProgressFunc func(percent float64)
+
 // Torrent holds data required to download a torrent from a list of peers
 type Torrent struct {
-	Peers       []peers.Peer
-	PeerID      [20]byte
-	InfoHash    [20]byte
-	PieceHashes [][20]byte
-	PieceLength int
-	Length      int
-	Name        string
+	Peers        []peers.Peer
+	PeerID       [20]byte
+	InfoHash     [20]byte
+	PieceHashes  [][20]byte
+	PieceLength  int
+	Length       int
+	Name         string
+	OnProgress   ProgressFunc
 }
 
 type pieceWork struct {
@@ -219,6 +223,9 @@ func (t *Torrent) Download() ([]byte, error) {
 		donePieces++
 
 		percent := float64(donePieces) / float64(len(t.PieceHashes)) * 100
+		if t.OnProgress != nil {
+			t.OnProgress(percent)
+		}
 		log.Printf("(%0.2f%%) Downloaded piece #%d\n", percent, res.index)
 	}
 	close(workQueue)

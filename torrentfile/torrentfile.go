@@ -47,7 +47,7 @@ func flattenAnnounceList(al [][]string) []string {
 }
 
 // DownloadToFile downloads a torrent and writes it to a file
-func (t *TorrentFile) DownloadToFile(path string) error {
+func (t *TorrentFile) DownloadToFile(path string, onProgress p2p.ProgressFunc) error {
 	var peerID [20]byte
 	_, err := rand.Read(peerID[:])
 	if err != nil {
@@ -67,6 +67,7 @@ func (t *TorrentFile) DownloadToFile(path string) error {
 		PieceLength: t.PieceLength,
 		Length:      t.Length,
 		Name:        t.Name,
+		OnProgress:  onProgress,
 	}
 	buf, err := torrent.Download()
 	if err != nil {
