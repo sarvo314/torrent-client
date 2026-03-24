@@ -7,9 +7,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
-	"time"
 
-	"github.com/gorilla/websocket"
 	"github.com/sarvo314/torrent-client/torrentfile"
 )
 
@@ -23,37 +21,10 @@ var (
 	downloads  = make(map[string]*DownloadState)
 	stateMutex sync.Mutex
 )
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true }, // allow all origins
-}
 
 type DownloadRequest struct {
 	TorrentPath string `json:"torrentPath"`
 	OutPath     string `json:"outPath"`
-}
-
-func wsHandler(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil) // upgrades HTTP → WebSocket
-	if err != nil {
-		log.Println("WebSocket upgrade error:", err)
-		return
-	}
-	defer conn.Close()
-	// Send progress updates in a loop
-	for {
-		stateMutex.Lock()
-		snapshot := make(map[string]*DownloadState)
-		for k, v := range downloads {
-			snapshot[k] = v
-		}
-		stateMutex.Unlock()
-		err := conn.WriteJSON(snapshot) // push state as JSON
-		if err != nil {
-			log.Println("WebSocket write error:", err)
-			break
-		}
-		time.Sleep(1 * time.Second) // send update every second
-	}
 }
 
 func downloadHandler(w http.ResponseWriter, r *http.Request) {
@@ -118,23 +89,28 @@ func startDownloadWorker(InPath, OutPath string, errChan chan<- error) {
 
 	err = tf.DownloadToFile(OutPath, func(percent float64) {
 		stateMutex.Lock()
-		defer stateMutex.Unlock()
 		downloads[hashStr].Progress = percent
+		stateMutex.Unlock()
+		broadcaster.Notify()
 	})
 	stateMutex.Lock()
-	defer stateMutex.Unlock()
 	if err != nil {
 		log.Println("Error downloading:", err)
 		downloads[hashStr].Status = "Error"
 		downloads[hashStr].Error = err.Error()
+		stateMutex.Unlock()
+		broadcaster.Notify()
 		return
 	}
 	log.Println("Download complete!")
 	downloads[hashStr].Status = "Complete"
 	downloads[hashStr].Progress = 100
+	stateMutex.Unlock()
+	broadcaster.Notify()
 }
 
 func main() {
+	go broadcaster.Run()
 
 	http.HandleFunc("/download", downloadHandler)
 	http.HandleFunc("/ws", wsHandler)
