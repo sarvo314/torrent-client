@@ -11,6 +11,7 @@ import (
 	"github.com/sarvo314/torrent-client/client"
 	"github.com/sarvo314/torrent-client/message"
 	"github.com/sarvo314/torrent-client/peers"
+	"github.com/sarvo314/torrent-client/torrentfile/fileinfo"
 )
 
 // MaxBlockSize is the largest number of bytes a request can ask for
@@ -24,14 +25,15 @@ type ProgressFunc func(percent float64)
 
 // Torrent holds data required to download a torrent from a list of peers
 type Torrent struct {
-	Peers        []peers.Peer
-	PeerID       [20]byte
-	InfoHash     [20]byte
-	PieceHashes  [][20]byte
-	PieceLength  int
-	Length       int
-	Name         string
-	OnProgress   ProgressFunc
+	Peers       []peers.Peer
+	PeerID      [20]byte
+	InfoHash    [20]byte
+	PieceHashes [][20]byte
+	PieceLength int
+	Length      int
+	Name        string
+	OnProgress  ProgressFunc
+	Files       []fileinfo.FileInfo
 }
 
 type pieceWork struct {
@@ -219,7 +221,24 @@ func (t *Torrent) Download() ([]byte, error) {
 			return nil, fmt.Errorf("all workers exited before download completion")
 		}
 		begin, end := t.calculateBoundsForPiece(res.index)
-		copy(buf[begin:end], res.buf)
+		// copy(buf[begin:end], res.buf)
+		for _, file := range t.Files {
+			if end <= file.GlobalStart {
+				break
+			}
+			if begin >= file.GlobalEnd {
+				continue
+			}
+			overlapStart := max(file.GlobalStart, begin)
+			overlapEnd := min(file.GlobalEnd, end)
+
+			pieceOffset := overlapStart - begin
+			fileOffset := overlapStart - file.GlobalStart
+			bytesToWrite := overlapEnd - overlapStart
+
+			file.WriteToFile(res.buf[pieceOffset:pieceOffset+bytesToWrite], int64(fileOffset))
+		}
+
 		donePieces++
 
 		percent := float64(donePieces) / float64(len(t.PieceHashes)) * 100
