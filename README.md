@@ -1,27 +1,37 @@
-# torrent-client
+# torrent-client (Enhanced Fork)
 
-[![CircleCI](https://circleci.com/gh/veggiedefender/torrent-client.svg?style=shield)](https://circleci.com/gh/veggiedefender/torrent-client)
+A lightweight BitTorrent client written in Go, originally based on
+https://github.com/veggiedefender/torrent-client.
 
-Tiny BitTorrent client written in Go. Read the blog post: https://blog.jse.li/posts/torrent/
+This fork extends the original implementation with additional protocol support
+and improved functionality.
 
-## Install
+## Features
+
+- Supports `.torrent` files
+- HTTP tracker support
+- UDP tracker support
+- Multi-file torrent support
+- Concurrent piece downloading
+- Minimal and readable implementation
+
+## Improvements Over Original
+
+Compared to the original project, this fork adds:
+
+- **UDP tracker support**
+  - Enables communication with a wider range of trackers
+  - Implements UDP announce protocol
+
+- **Multi-file torrent support**
+  - Handles directory-based torrents
+  - Correct file layout and piece mapping
+ 
+- **Write to Disk Directly**
+  - Instead of storing buffer on RAM now it's stored on disk
+
+
+## Installation
 
 ```sh
-go get github.com/veggiedefender/torrent-client
-```
-
-## Usage
-Try downloading [Debian](https://cdimage.debian.org/debian-cd/current/amd64/bt-cd/#indexlist)!
-
-```sh
-torrent-client debian-10.2.0-amd64-netinst.iso.torrent debian.iso
-```
-
-[![asciicast](https://asciinema.org/a/xqRSB0Jec8RN91Zt89rbb9PcL.svg)](https://asciinema.org/a/xqRSB0Jec8RN91Zt89rbb9PcL)
-
-
-## Limitations
-* Only supports `.torrent` files (no magnet links)
-* Only supports HTTP trackers
-* Does not support multi-file torrents
-* Strictly leeches (does not support uploading pieces)
+go install github.com/<your-username>/torrent-client@latest
