@@ -36,13 +36,13 @@ func (f *FileInfo) WriteToFile(buf []byte, offset int64) {
 	}
 	defer file.Close()
 
-	// Ensure file is large enough (important for torrent use-case)
 	info, err := file.Stat()
 	if err != nil {
 		fmt.Println("Stat error:", err)
 		return
 	}
 
+	// Ensure file is large enough
 	if info.Size() < int64(f.Length) {
 		err = file.Truncate(int64(f.Length))
 		if err != nil {
@@ -58,30 +58,3 @@ func (f *FileInfo) WriteToFile(buf []byte, offset int64) {
 		return
 	}
 }
-
-// func (f *FileInfo) WriteToFile(buf []byte, offset int64) {
-// 	var file *os.File
-// 	// Create file of length if it doesn't exist
-// 	file, err := os.OpenFile(f.GlobalPath, os.O_RDWR|os.O_CREATE, 0644)
-// 	if os.IsNotExist(err) {
-// 		if err != nil {
-// 			fmt.Println("Error creating file:", err)
-// 			return
-// 		}
-
-// 		// Allocate size
-// 		err = file.Truncate(int64(f.Length))
-// 		if err != nil {
-// 			fmt.Println("Truncate error:", err)
-// 			return
-// 		}
-// 	}
-
-// 	if err != nil {
-// 		fmt.Println("Error opening file:", err)
-// 		return
-// 	}
-// 	file.WriteAt(buf, int64(offset))
-// 	defer file.Close()
-
-// }

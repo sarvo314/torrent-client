@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"fmt"
-	"log"
 	"os"
 
 	"path/filepath"
@@ -238,7 +237,7 @@ func (bto *bencodeTorrent) toTorrentFile() (TorrentFile, error) {
 	if len(announceList) == 0 && bto.Announce != "" {
 		announceList = []string{bto.Announce}
 	}
-	log.Printf("Announce list is %v\n", announceList)
+	// log.Printf("Announce list is %v\n", announceList)
 
 	files := make([]File, len(bto.Info.Files))
 	for i, f := range bto.Info.Files {

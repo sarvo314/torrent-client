@@ -11,7 +11,7 @@ type Broadcaster struct {
 	mu         sync.Mutex
 }
 
-func newBroadcaster() *Broadcaster {
+func NewBroadcaster() *Broadcaster {
 	return &Broadcaster{
 		clients:    make(map[chan map[string]DownloadState]bool),
 		register:   make(chan chan map[string]DownloadState),
@@ -57,4 +57,4 @@ func (b *Broadcaster) Notify() {
 	}
 }
 
-var broadcaster = newBroadcaster()
+var broadcaster = NewBroadcaster()
