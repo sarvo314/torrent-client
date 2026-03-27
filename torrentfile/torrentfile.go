@@ -5,13 +5,14 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"fmt"
-	"log"
 	"os"
 
 	"path/filepath"
+	"sort"
 
 	"github.com/jackpal/bencode-go"
 	"github.com/sarvo314/torrent-client/p2p"
+	"github.com/sarvo314/torrent-client/torrentfile/fileinfo"
 )
 
 // Port to listen on
@@ -59,6 +60,35 @@ func (t *TorrentFile) DownloadToFile(path string, onProgress p2p.ProgressFunc) e
 		return err
 	}
 
+	var fileInfo = make([]fileinfo.FileInfo, 0)
+	if len(t.Files) == 0 {
+		// Single file torrent
+		fileInfo = append(fileInfo, *fileinfo.NewFileInfo(path, t.Length))
+		fileInfo[0].SetGlobalStart(0)
+		fileInfo[0].SetGlobalEnd(t.Length)
+	} else {
+		offset := 0
+		for i, file := range t.Files {
+			// Join path elements
+			relPath := filepath.Join(file.Path...)
+			fullPath := filepath.Join(path, relPath)
+
+			// Create directories
+			err := os.MkdirAll(filepath.Dir(fullPath), os.ModePerm)
+			if err != nil {
+				return err
+			}
+			fileInfo = append(fileInfo, *fileinfo.NewFileInfo(fullPath, file.Length))
+			fileInfo[i].SetGlobalStart(offset)
+			fileInfo[i].SetGlobalEnd(offset + file.Length)
+
+			offset += file.Length
+		}
+	}
+
+	sort.Slice(fileInfo, func(i, j int) bool {
+		return fileInfo[i].GlobalStart < fileInfo[j].GlobalStart
+	})
 	torrent := p2p.Torrent{
 		Peers:       peers,
 		PeerID:      peerID,
@@ -68,43 +98,15 @@ func (t *TorrentFile) DownloadToFile(path string, onProgress p2p.ProgressFunc) e
 		Length:      t.Length,
 		Name:        t.Name,
 		OnProgress:  onProgress,
+		Files:       fileInfo,
 	}
-	buf, err := torrent.Download()
+	_, err = torrent.Download()
+
 	if err != nil {
 		return err
 	}
 
-	if len(t.Files) == 0 {
-		// Single file torrent
-		outFile, err := os.Create(path)
-		if err != nil {
-			return err
-		}
-		defer outFile.Close()
-		_, err = outFile.Write(buf)
-		return err
-	}
-
 	// Multi-file torrent
-	offset := 0
-	for _, file := range t.Files {
-		// Join path elements
-		relPath := filepath.Join(file.Path...)
-		fullPath := filepath.Join(path, relPath)
-
-		// Create directories
-		err := os.MkdirAll(filepath.Dir(fullPath), os.ModePerm)
-		if err != nil {
-			return err
-		}
-
-		// Write file
-		err = os.WriteFile(fullPath, buf[offset:offset+file.Length], 0644)
-		if err != nil {
-			return err
-		}
-		offset += file.Length
-	}
 
 	return nil
 }
@@ -235,7 +237,7 @@ func (bto *bencodeTorrent) toTorrentFile() (TorrentFile, error) {
 	if len(announceList) == 0 && bto.Announce != "" {
 		announceList = []string{bto.Announce}
 	}
-	log.Printf("Announce list is %v\n", announceList)
+	// log.Printf("Announce list is %v\n", announceList)
 
 	files := make([]File, len(bto.Info.Files))
 	for i, f := range bto.Info.Files {

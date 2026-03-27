@@ -44,12 +44,15 @@ func downloadHandler(w http.ResponseWriter, r *http.Request) {
 	go startDownloadWorker(req.TorrentPath, req.OutPath, errChan)
 
 	// Wait for the initialization result
+	w.Header().Set("Content-Type", "application/json")
 	if err := <-errChan; err != nil {
 		http.Error(w, fmt.Sprintf("Download failed: %v", err), http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"message": "Download failed",
+		})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	json.NewEncoder(w).Encode(map[string]string{
 		"message": "Download started",
@@ -68,12 +71,20 @@ func startDownloadWorker(InPath, OutPath string, errChan chan<- error) {
 	log.Println("Torrent hash:", hashStr)
 	stateMutex.Lock()
 	if _, ok := downloads[hashStr]; ok {
-		if downloads[hashStr].Status == "Error" {
+		switch downloads[hashStr].Status {
+		case "Error":
 			delete(downloads, hashStr)
-		} else {
+		case "Downloading":
 			stateMutex.Unlock()
-			log.Println("Download already in progress")
 			errChan <- fmt.Errorf("download already in progress")
+			return
+		case "Complete":
+			stateMutex.Unlock()
+			errChan <- fmt.Errorf("download already completed")
+			return
+		default:
+			stateMutex.Unlock()
+			errChan <- fmt.Errorf("state not found")
 			return
 		}
 	}
